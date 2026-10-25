@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aplikasi Pendaftaran Bimbel</title>
+  
+  <!-- CDN React, ReactDOM, Babel & TailwindCSS -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- CDN html2pdf untuk Fitur Download PDF Langsung -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- WAJIB: data-type="module" agar bisa import Firebase SDK versi modern di dalam Babel -->
+  <script type="text/babel" data-type="module">
+    const { useState, useEffect } = React;
+
+    // --- IMPORT FIREBASE SDK ---
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { 
+      getFirestore, collection, doc, setDoc, deleteDoc, updateDoc, onSnapshot 
+    } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    // --- FIREBASE CONFIGURATION ---
+    const firebaseConfig = {
+      apiKey: "AIzaSyCHlrrRWipqiM3wUnMSB0h7vOl9geEFCmw",
+      authDomain: "pendaftaranbimbel.firebaseapp.com",
+      projectId: "pendaftaranbimbel",
+      storageBucket: "pendaftaranbimbel.firebasestorage.app",
+      messagingSenderId: "217817528056",
+      appId: "1:217817528056:web:00fbc4ee2054e4a6e76d0d",
+      measurementId: "G-X172N47YKR"
+    };
+
+    // Initialize Firebase
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // --- DEFAULT INITIAL DATA (Jika Database Kosong) ---
+    const DEFAULT_SETTINGS = {
+      logo: 'https://placehold.co/400x150/0ea5e9/ffffff?text=LOGO+BIMBEL',
+      adminPhone: '6281234567890',
+      waRegTemplate: 'Halo Admin, saya [NAMA] telah mendaftar [PAKET]. Berikut bukti pembayarannya dengan nominal Rp[NOMINAL]. Mohon segera diproses.',
+      waApproveTemplate: 'Selamat akun anda telah aktif. Berikut adalah\nUsername: [USERNAME]\nPassword: [PASSWORD]\n\nYang dapat digunakan untuk login. Apabila ada kendala segera hubungi admin.'
+    };
+
+    // --- FUNGSI GLOBAL DOWNLOAD PDF ---
+    const downloadPDF = (elementId, fileName) => {
+        const element = document.getElementById(elementId);
+        const opt = {
+          margin:       0.3,
+          filename:     fileName,
+          image:        { type: 'jpeg', quality: 0.98 },
+          html2canvas:  { 
+            scale: 2, 
+            useCORS: true,
+            ignoreElements: (el) => el.classList && el.classList.contains('no-print') 
+          },
+          jsPDF:        { unit: 'in', format: 'letter', orientation: 'landscape' }
+        };
+        html2pdf().set(opt).from(element).save();
+    };
+
+    // --- MAIN APP COMPONENT ---
+    function App() {
+      // Global States
+      const [view, setView] = useState('user'); // 'user' or 'admin'
+      const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
+      const [toast, setToast] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      // App Data States (Dari Firebase)
+      const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+      const [packages, setPackages] = useState([]);
+      const [payments, setPayments] = useState([]);
+      const [registrations, setRegistrations] = useState([]);
+
+      // Sinkronisasi dengan Firebase Realtime (onSnapshot)
+      useEffect(() => {
+        const unsubSettings = onSnapshot(doc(db, "settings", "global"), (docSnap) => {
+          if (docSnap.exists()) {
+            setSettings(docSnap.data());
+          } else {
+            setDoc(doc(db, "settings", "global"), DEFAULT_SETTINGS);
+          }
+        });
+
+        const unsubPackages = onSnapshot(collection(db, "packages"), (snap) => {
+          setPackages(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+
+        const unsubPayments = onSnapshot(collection(db, "payments"), (snap) => {
+          setPayments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+
+        const unsubRegs = onSnapshot(collection(db, "registrations"), (snap) => {
+          setRegistrations(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+          setLoading(false); // Data utama selesai diload
+        });
+
+        return () => {
+          unsubSettings(); unsubPackages(); unsubPayments(); unsubRegs();
+        };
+      }, []);
+
+      const showToast = (msg, type = 'info') => {
+        setToast({ msg, type });
+        setTimeout(() => setToast(null), 3000);
+      };
+
+      if (loading) {
+        return <div className="min-h-screen flex items-center justify-center bg-slate-50 font-bold text-sky-600 text-xl">Memuat Database...</div>;
+      }
+
+      return (
+        <div className="min-h-screen bg-slate-50 text-gray-900 font-sans selection:bg-yellow-300">
+          {toast && (
+            <div className={`fixed top-5 left-1/2 transform -translate-x-1/2 z-50 px-6 py-3 rounded-full shadow-lg text-white font-medium transition-all ${toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-green-500' : 'bg-sky-500'}`}>
+              {toast.msg}
+            </div>
+          )}
+
+          {view === 'user' ? (
+            <UserView 
+              settings={settings} 
+              packages={packages} 
+              payments={payments} 
+              changeView={setView} 
+              showToast={showToast}
+            />
+          ) : (
+            <AdminView 
+              isLoggedIn={isAdminLoggedIn}
+              setIsLoggedIn={setIsAdminLoggedIn}
+              changeView={setView}
+              settings={settings}
+              packages={packages}
+              payments={payments}
+              registrations={registrations}
+              showToast={showToast}
+            />
+          )}
+        </div>
+      );
+    }
+
+    // ==========================================
+    // USER VIEW (FRONTEND)
+    // ==========================================
+    function UserView({ settings, packages, payments, changeView, showToast }) {
+      const [formData, setFormData] = useState({
+        name: '', userWa: '', address: '', packageId: '', paymentId: '', receipt: '', agree: false
+      });
+      const [isSubmitting, setIsSubmitting] = useState(false);
+      
+      const selectedPackage = packages.find(p => p.id === formData.packageId);
+      const selectedPayment = payments.find(p => p.id === formData.paymentId);
+
+      const handleImageCompress = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        if (file.size > 2 * 1024 * 1024) {
+          showToast('Ukuran gambar maksimal 2 MB!', 'error');
+          e.target.value = '';
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const MAX_WIDTH = 800;
+            const scaleSize = MAX_WIDTH / img.width;
+            canvas.width = MAX_WIDTH;
+            canvas.height = img.height * scaleSize;
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            
+            const compressedBase64 = canvas.toDataURL('image/jpeg', 0.6);
+            setFormData(prev => ({ ...prev, receipt: compressedBase64 }));
+          };
+          img.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+      };
+
+      const handleSubmit = async (e) => {
+        e.preventDefault();
+        if (!formData.name || !formData.userWa || !formData.address || !formData.packageId || !formData.paymentId || !formData.receipt || !formData.agree) {
+          showToast('Harap lengkapi semua bidang yang wajib diisi.', 'error');
+          return;
+        }
+
+        setIsSubmitting(true);
+        const newRegId = Date.now().toString();
+        const newReg = {
+          id: newRegId,
+          date: new Date().toISOString(),
+          ...formData,
+          status: 'pending',
+          isDeletedRevenue: false
+        };
+
+        try {
+          // Simpan ke Firestore
+          await setDoc(doc(db, "registrations", newRegId), newReg);
+          
+          showToast('Pendaftaran berhasil disimpan. Mengarahkan ke WhatsApp...', 'success');
+          
+          let waMsg = settings.waRegTemplate
+            .replace(/\[NAMA\]/g, formData.name)
+            .replace(/\[PAKET\]/g, selectedPackage?.name || '-')
+            .replace(/\[NOMINAL\]/g, selectedPackage?.price.toLocaleString('id-ID') || '0');
+          
+          const waUrl = `https://api.whatsapp.com/send?phone=${settings.adminPhone}&text=${encodeURIComponent(waMsg)}`;
+          window.open(waUrl, '_blank');
+          
+          setFormData({ name: '', userWa: '', address: '', packageId: '', paymentId: '', receipt: '', agree: false });
+        } catch (error) {
+          showToast('Terjadi kesalahan koneksi database.', 'error');
+        } finally {
+          setIsSubmitting(false);
+        }
+      };
+
+      return (
+        <div className="pb-24">
+          <header className="bg-white shadow-sm sticky top-0 z-40 border-b-4 border-yellow-400">
+            <div className="max-w-4xl mx-auto px-4 py-4 flex justify-center">
+              <img src={settings.logo} alt="Logo Bimbel" className="max-h-16 object-contain" onError={(e) => e.target.src = 'https://placehold.co/400x150/0ea5e9/ffffff?text=LOGO'} />
+            </div>
+          </header>
+
+          <main className="max-w-3xl mx-auto px-4 mt-8">
+            <div className="bg-white rounded-2xl shadow-xl overflow-hidden border border-sky-100">
+              <div className="bg-sky-500 p-6 text-center text-white">
+                <h1 className="text-2xl font-bold tracking-wide">Formulir Pendaftaran Bimbel</h1>
+                <p className="text-sky-100 mt-1">Lengkapi data diri Anda di bawah ini untuk memulai belajar.</p>
+              </div>
+              
+              <form onSubmit={handleSubmit} className="p-6 md:p-8 space-y-6">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">1. Nama Lengkap <span className="text-red-500">*</span></label>
+                  <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition" placeholder="Masukkan nama lengkap Anda" />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">2. Nomor WhatsApp Aktif <span className="text-red-500">*</span></label>
+                  <input type="text" required value={formData.userWa} onChange={e => setFormData({...formData, userWa: e.target.value})} className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition" placeholder="Contoh: 6281234567890 (Gunakan awalan 62)" />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">3. Alamat Lengkap <span className="text-red-500">*</span></label>
+                  <textarea required value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-sky-500 bg-white h-24" placeholder="Masukkan alamat domisili lengkap Anda"></textarea>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">4. Pilihan Paket <span className="text-red-500">*</span></label>
+                  <select required value={formData.packageId} onChange={e => setFormData({...formData, packageId: e.target.value})} className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-sky-500 bg-white">
+                    <option value="">-- Pilih Paket Bimbel --</option>
+                    {packages.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                  {selectedPackage && (
+                    <div className="mt-3 p-4 bg-yellow-50 border border-yellow-200 rounded-lg flex justify-between items-center">
+                      <span className="text-yellow-800 font-medium">Nominal yang harus dibayar:</span>
+                      <span className="text-2xl font-bold text-gray-900">Rp {selectedPackage.price.toLocaleString('id-ID')}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">5. Metode Pembayaran <span className="text-red-500">*</span></label>
+                  <select required value={formData.paymentId} onChange={e => setFormData({...formData, paymentId: e.target.value})} className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-sky-500 bg-white">
+                    <option value="">-- Pilih Bank / E-Wallet --</option>
+                    {payments.map(p => <option key={p.id} value={p.id}>{p.type}</option>)}
+                  </select>
+                  {selectedPayment && (
+                    <div className="mt-3 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                      <p className="text-sm text-gray-500 mb-1">Tujuan Transfer:</p>
+                      <p className="text-lg font-bold text-black mb-3">{selectedPayment.account}</p>
+                      <p className="text-sm text-gray-500 mb-1">Cara Pembayaran:</p>
+                      <p className="text-sm text-gray-700 bg-white p-3 rounded border border-gray-200">{selectedPayment.instructions}</p>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">6. Upload Bukti Transfer <span className="text-red-500">*</span></label>
+                  <input type="file" required accept="image/png, image/jpeg, image/jpg" onChange={handleImageCompress} className="block w-full text-sm text-gray-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-sky-50 file:text-sky-700 hover:file:bg-sky-100 border border-gray-300 rounded-lg p-1" />
+                  <p className="text-xs text-gray-500 mt-2">* Format PNG/JPG/JPEG. Maksimal 2MB.</p>
+                  {formData.receipt && (
+                    <div className="mt-3">
+                      <img src={formData.receipt} alt="Preview Bukti" className="h-32 rounded-lg border shadow-sm object-cover" />
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-4 border-t border-gray-200">
+                  <label className="flex items-start space-x-3 cursor-pointer">
+                    <input type="checkbox" required checked={formData.agree} onChange={e => setFormData({...formData, agree: e.target.checked})} className="mt-1 w-5 h-5 text-sky-500 border-gray-300 rounded focus:ring-sky-500" />
+                    <span className="text-sm text-gray-700">Saya menyetujui dan memahami semua persyaratan dan kebijakan yang berlaku.</span>
+                  </label>
+                </div>
+
+                <button type="submit" disabled={!formData.agree || isSubmitting} className="w-full bg-yellow-400 hover:bg-yellow-500 text-black font-bold py-4 rounded-xl shadow-lg transition transform hover:-translate-y-1 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none text-lg">
+                  {isSubmitting ? 'Menyimpan...' : 'Kirim Pendaftaran'}
+                </button>
+              </form>
+            </div>
+
+            <div className="mt-12">
+              <h2 className="text-xl font-bold text-center text-gray-900 mb-6">Paket Yang Tersedia</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                {packages.map(pkg => (
+                  <div key={pkg.id} className="bg-white p-6 rounded-2xl shadow-md border-t-4 border-sky-500 flex flex-col h-full">
+                    <h3 className="text-lg font-bold text-black mb-2">{pkg.name}</h3>
+                    <p className="text-gray-600 text-sm mb-4 flex-grow">{pkg.desc}</p>
+                    <div className="mt-auto pt-4 border-t border-gray-100 text-xl font-extrabold text-sky-600">
+                      Rp {pkg.price.toLocaleString('id-ID')}
+                    </div>
+                  </div>
+                ))}
+                {packages.length === 0 && <p className="text-gray-500 text-center col-span-2">Belum ada paket tersedia.</p>}
+              </div>
+            </div>
+          </main>
+
+          <button onClick={() => changeView('admin')} className="fixed bottom-6 right-6 bg-black hover:bg-gray-800 text-white p-4 rounded-full shadow-2xl transition transform hover:scale-110 flex items-center justify-center group" title="Panel Admin">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+          </button>
+        </div>
+      );
+    }
+
+    // ==========================================
+    // ADMIN VIEW (BACKEND)
+    // ==========================================
+    function AdminView({ isLoggedIn, setIsLoggedIn, changeView, settings, packages, payments, registrations, showToast }) {
+      const [pin, setPin] = useState('');
+      const [activeTab, setActiveTab] = useState('dashboard');
+
+      if (!isLoggedIn) {
+        return (
+          <div className="min-h-screen flex items-center justify-center bg-gray-900 p-4">
+            <div className="bg-white p-8 rounded-2xl shadow-2xl max-w-sm w-full text-center">
+              <h2 className="text-2xl font-bold text-black mb-6">Login Admin</h2>
+              <input 
+                type="password" 
+                value={pin} 
+                onChange={e => setPin(e.target.value)} 
+                placeholder="Masukkan Password" 
+                className="w-full px-4 py-3 border rounded-lg text-center tracking-widest font-mono text-lg focus:ring-2 focus:ring-sky-500 mb-4" 
+                onKeyDown={e => e.key === 'Enter' && (pin === 'aam14' ? (setIsLoggedIn(true), showToast('Login berhasil', 'success')) : showToast('Password Salah!', 'error'))} 
+              />
+              <button 
+                onClick={() => {
+                  if (pin === 'aam14') { setIsLoggedIn(true); showToast('Login berhasil', 'success'); }
+                  else { showToast('Password Salah!', 'error'); }
+                }} 
+                className="w-full bg-sky-500 hover:bg-sky-600 text-white font-bold py-3 rounded-lg mb-4">
+                Masuk
+              </button>
+              <button onClick={() => changeView('user')} className="text-sm text-gray-500 hover:text-black">Kembali ke Web</button>
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row">
+          <aside className="w-full md:w-64 bg-gray-900 text-white flex flex-col min-h-screen no-print">
+            <div className="p-6 border-b border-gray-800">
+              <h2 className="text-xl font-bold text-yellow-400">Admin Panel</h2>
+            </div>
+            <nav className="flex-grow py-4">
+              {[
+                { id: 'dashboard', label: 'Verifikasi Pendaftar' },
+                { id: 'accounts', label: 'Riwayat Akun' },
+                { id: 'revenue', label: 'Rekap Pendapatan' },
+                { id: 'packages', label: 'Kelola Paket' },
+                { id: 'payments', label: 'Metode Pembayaran' },
+                { id: 'settings', label: 'Pengaturan Web' }
+              ].map(tab => (
+                <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`w-full text-left px-6 py-3 transition ${activeTab === tab.id ? 'bg-sky-500 text-white border-l-4 border-yellow-400' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}>
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
+            <div className="p-4 border-t border-gray-800">
+              <button onClick={() => changeView('user')} className="w-full bg-white text-black py-2 rounded font-semibold hover:bg-gray-200">Lihat Web</button>
+            </div>
+          </aside>
+
+          <main className="flex-1 p-6 md:p-8 overflow-x-hidden relative">
+            {activeTab === 'dashboard' && <AdminDashboard registrations={registrations} packages={packages} payments={payments} settings={settings} showToast={showToast} />}
+            {activeTab === 'accounts' && <AdminAccounts registrations={registrations} packages={packages} showToast={showToast} />}
+            {activeTab === 'revenue' && <AdminRevenue registrations={registrations} packages={packages} showToast={showToast} />}
+            {activeTab === 'packages' && <AdminPackages packages={packages} showToast={showToast} />}
+            {activeTab === 'payments' && <AdminPayments payments={payments} showToast={showToast} />}
+            {activeTab === 'settings' && <AdminSettings settings={settings} showToast={showToast} />}
+          </main>
+        </div>
+      );
+    }
+
+    // --- ADMIN DASHBOARD ---
+    function AdminDashboard({ registrations, packages, payments, settings, showToast }) {
+      const [filterName, setFilterName] = useState('');
+      const [filterDate, setFilterDate] = useState('');
+      const [filterPkg, setFilterPkg] = useState('all');
+      const [verifyModal, setVerifyModal] = useState(null);
+      const [verifyData, setVerifyData] = useState({ username: '', password: '' });
+      const [previewImage, setPreviewImage] = useState(null); 
+
+      const pendingCount = registrations.filter(r => r.status === 'pending').length;
+      const verifiedCount = registrations.filter(r => r.status === 'verified').length;
+      
+      const filteredRegs = registrations.filter(r => {
+        const matchName = r.name.toLowerCase().includes(filterName.toLowerCase());
+        const matchDate = filterDate ? r.date.startsWith(filterDate) : true;
+        const matchPkg = filterPkg === 'all' || r.packageId === filterPkg;
+        return matchName && matchDate && matchPkg;
+      });
+
+      const pendingList = filteredRegs.filter(r => r.status === 'pending').sort((a, b) => new Date(a.date) - new Date(b.date));
+      const verifiedList = filteredRegs.filter(r => r.status === 'verified').sort((a, b) => new Date(a.date) - new Date(b.date));
+
+      const handleClearAll = async () => {
+        if(window.confirm('Yakin ingin MENGHAPUS SEMUA data pendaftar (pending) di database? Tindakan ini tidak dapat dibatalkan.')) {
+          try {
+            for (let reg of pendingList) {
+               await deleteDoc(doc(db, "registrations", reg.id));
+            }
+            showToast('Data verifikasi pendaftaran dihapus dari database.', 'success');
+          } catch(err) { showToast('Gagal menghapus data', 'error'); }
+        }
+      };
+
+      const handleVerify = async (e) => {
+        e.preventDefault();
+        const verifyDate = new Date().toISOString();
+        
+        try {
+          await updateDoc(doc(db, "registrations", verifyModal.id), {
+            status: 'verified', 
+            username: verifyData.username, 
+            password: verifyData.password, 
+            verifiedAt: verifyDate
+          });
+          
+          let waMsg = settings.waApproveTemplate
+            .replace(/\[USERNAME\]/g, verifyData.username)
+            .replace(/\[PASSWORD\]/g, verifyData.password);
+          
+          const targetPhone = verifyModal.userWa || settings.adminPhone;
+          const waUrl = `https://api.whatsapp.com/send?phone=${targetPhone}&text=${encodeURIComponent(waMsg)}`;
+          window.open(waUrl, '_blank');
+          
+          setVerifyModal(null);
+          setVerifyData({ username: '', password: '' });
+          showToast('Akun berhasil diverifikasi!', 'success');
+        } catch(err) { showToast('Gagal verifikasi data', 'error'); }
+      };
+
+      return (
+        <div>
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4">
+            <div>
+              <h2 className="text-2xl font-bold text-black mb-1">Verifikasi Pendaftar</h2>
+              <p className="text-gray-500">Cek bukti transfer dan buatkan akun untuk pendaftar.</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={handleClearAll} className="bg-red-500 text-white px-4 py-2 rounded shadow hover:bg-red-600 transition font-medium text-sm no-print">
+                 Hapus Semua Data
+              </button>
+              <button onClick={() => downloadPDF('pdf-verifikasi', 'Tabel_Verifikasi_Pendaftar.pdf')} className="bg-black text-white px-4 py-2 rounded shadow hover:bg-gray-800 transition font-medium text-sm no-print">
+                 Unduh PDF Tabel
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 no-print">
+            <div className="bg-yellow-50 border border-yellow-200 p-5 rounded-xl shadow-sm flex items-center justify-between">
+              <div>
+                <h3 className="text-yellow-800 font-semibold text-sm">Belum Diverifikasi</h3>
+                <p className="text-3xl font-bold text-yellow-900 mt-1">{pendingCount}</p>
+              </div>
+            </div>
+            <div className="bg-green-50 border border-green-200 p-5 rounded-xl shadow-sm flex items-center justify-between">
+              <div>
+                <h3 className="text-green-800 font-semibold text-sm">Sudah Diverifikasi</h3>
+                <p className="text-3xl font-bold text-green-900 mt-1">{verifiedCount}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6 flex flex-wrap gap-4 items-end no-print">
+            <div className="flex-1 min-w-[150px]">
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Cari Nama</label>
+              <input type="text" value={filterName} onChange={e=>setFilterName(e.target.value)} className="w-full border rounded p-2 focus:ring-sky-500" placeholder="Ketik nama..." />
+            </div>
+            <div className="flex-1 min-w-[150px]">
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Pilih Paket</label>
+              <select value={filterPkg} onChange={e=>setFilterPkg(e.target.value)} className="w-full border rounded p-2 focus:ring-sky-500">
+                <option value="all">Semua Paket</option>
+                {packages.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div className="flex-1 min-w-[150px]">
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Tanggal Daftar</label>
+              <input type="date" value={filterDate} onChange={e=>setFilterDate(e.target.value)} className="w-full border rounded p-2 focus:ring-sky-500" />
+            </div>
+          </div>
+
+          <div id="pdf-verifikasi" className="space-y-8">
+            {/* TABEL PENDING */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-yellow-50 p-4 border-b border-yellow-200">
+                <h3 className="text-lg font-bold text-yellow-900">Antrean Belum Diverifikasi</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[900px]">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="p-4 text-sm font-bold text-gray-700">Tgl & Identitas</th>
+                      <th className="p-4 text-sm font-bold text-gray-700">Alamat</th>
+                      <th className="p-4 text-sm font-bold text-gray-700">Paket</th>
+                      <th className="p-4 text-sm font-bold text-gray-700">Metode Bayar</th>
+                      <th className="p-4 text-sm font-bold text-gray-700">Bukti Transfer</th>
+                      <th className="p-4 text-sm font-bold text-gray-700 no-print text-center">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingList.map(reg => {
+                      const pkg = packages.find(p => p.id === reg.packageId);
+                      const pay = payments.find(p => p.id === reg.paymentId);
+                      return (
+                        <tr key={reg.id} className="border-b border-gray-100 hover:bg-gray-50">
+                          <td className="p-4 text-sm">
+                            <span className="text-gray-500 text-xs block mb-1">{new Date(reg.date).toLocaleDateString('id-ID')}</span>
+                            <strong className="text-gray-900 block">{reg.name}</strong>
+                            <span className="text-green-600 text-xs">{reg.userWa}</span>
+                          </td>
+                          <td className="p-4 text-sm text-gray-600 max-w-[200px] truncate" title={reg.address}>{reg.address}</td>
+                          <td className="p-4 text-sm">
+                            <span className="text-sky-700 font-bold block">{pkg ? pkg.name : 'Terhapus'}</span>
+                            <span className="text-xs text-gray-500 bg-gray-100 px-2 py-0.5 rounded">Rp {pkg ? pkg.price.toLocaleString('id-ID') : '0'}</span>
+                          </td>
+                          <td className="p-4 text-sm font-semibold">{pay ? pay.type : 'Lainnya'}</td>
+                          <td className="p-4">
+                            <button onClick={() => setPreviewImage(reg.receipt)} className="text-blue-600 text-sm hover:underline no-print bg-blue-50 px-2 py-1 rounded">Lihat Bukti</button>
+                          </td>
+                          <td className="p-4 text-center no-print">
+                             <button onClick={() => setVerifyModal(reg)} className="bg-sky-500 hover:bg-sky-600 text-white text-xs px-3 py-1.5 rounded font-bold">Beri Akun</button>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                    {pendingList.length === 0 && <tr><td colSpan="6" className="p-8 text-center text-gray-500">Tidak ada antrean.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* TABEL VERIFIED */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="bg-green-50 p-4 border-b border-green-200">
+                <h3 className="text-lg font-bold text-green-900">Riwayat Sudah Diverifikasi (Selesai)</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse min-w-[900px]">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="p-4 text-sm font-bold text-gray-700">Tgl & Identitas</th>
+                      <th className="p-4 text-sm font-bold text-gray-700">Paket</th>
+                      <th className="p-4 text-sm font-bold text-gray-700">Metode Bayar</th>
+                      <th className="p-4 text-sm font-bold text-gray-700">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {verifiedList.map(reg => {
+                      const pkg = packages.find(p => p.id === reg.packageId);
+                      const pay = payments.find(p => p.id === reg.paymentId);
+                      return (
+                        <tr key={reg.id} className="border-b border-gray-100 opacity-80 hover:bg-gray-50">
+                          <td className="p-4 text-sm">
+                            <span className="text-gray-500 text-xs block mb-1">{new Date(reg.date).toLocaleDateString('id-ID')}</span>
+                            <strong className="text-gray-900 block">{reg.name}</strong>
+                          </td>
+                          <td className="p-4 text-sm text-sky-700 font-bold">{pkg ? pkg.name : 'Terhapus'}</td>
+                          <td className="p-4 text-sm font-semibold">{pay ? pay.type : 'Lainnya'}</td>
+                          <td className="p-4"><span className="px-2 py-1 rounded text-xs font-bold bg-green-100 text-green-800">SELESAI</span></td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          {/* MODALS */}
+          {previewImage && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm no-print">
+              <div className="relative max-w-4xl w-full h-full flex items-center justify-center">
+                <button onClick={() => setPreviewImage(null)} className="absolute top-4 right-4 md:-right-8 text-white hover:text-red-400 text-5xl font-bold transition">&times;</button>
+                <img src={previewImage} alt="Bukti" className="max-w-full max-h-[90vh] rounded-lg shadow-2xl object-contain border-4 border-white/20" />
+              </div>
+            </div>
+          )}
+
+          {verifyModal && (
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print">
+              <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full">
+                <h3 className="text-xl font-bold mb-4">Verifikasi & Buat Akun</h3>
+                <form onSubmit={handleVerify}>
+                  <div className="mb-4">
+                    <label className="block text-sm font-semibold mb-1">Buat Username</label>
+                    <input type="text" required value={verifyData.username} onChange={e=>setVerifyData({...verifyData, username: e.target.value})} className="w-full border rounded p-2 focus:ring-sky-500" />
+                  </div>
+                  <div className="mb-6">
+                    <label className="block text-sm font-semibold mb-1">Buat Password</label>
+                    <input type="text" required value={verifyData.password} onChange={e=>setVerifyData({...verifyData, password: e.target.value})} className="w-full border rounded p-2 focus:ring-sky-500" />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => setVerifyModal(null)} className="px-4 py-2 border rounded hover:bg-gray-100 font-medium">Batal</button>
+                    <button type="submit" className="px-4 py-2 bg-yellow-400 hover:bg-yellow-500 text-black font-bold rounded">Simpan & Kirim WA</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // --- ADMIN ACCOUNTS ---
+    function AdminAccounts({ registrations, packages, showToast }) {
+      const verifiedRegs = registrations.filter(r => r.status === 'verified');
+
+      const handleClearAll = async () => {
+        if(window.confirm('Hapus SEMUA riwayat akun di Firebase?')) {
+          try {
+            for (let reg of verifiedRegs) await deleteDoc(doc(db, "registrations", reg.id));
+            showToast('Semua riwayat terhapus', 'success');
+          } catch(err) { showToast('Gagal menghapus', 'error'); }
+        }
+      };
+
+      return (
+        <div>
+          <div className="flex justify-between items-end mb-8">
+            <div><h2 className="text-2xl font-bold">Riwayat Akun</h2></div>
+            <div className="flex gap-2">
+              <button onClick={handleClearAll} className="bg-red-500 text-white px-4 py-2 rounded text-sm no-print">Hapus Semua</button>
+              <button onClick={() => downloadPDF('pdf-accounts', 'Riwayat_Akun.pdf')} className="bg-black text-white px-4 py-2 rounded text-sm no-print">Unduh PDF</button>
+            </div>
+          </div>
+          <div id="pdf-accounts" className="bg-white rounded-xl shadow border overflow-hidden">
+             <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-sky-50">
+                    <th className="p-4 text-sm">Nama</th>
+                    <th className="p-4 text-sm">Paket</th>
+                    <th className="p-4 text-sm bg-yellow-50">Username</th>
+                    <th className="p-4 text-sm bg-yellow-50">Password</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {verifiedRegs.map(reg => {
+                    const pkg = packages.find(p => p.id === reg.packageId);
+                    return (
+                      <tr key={reg.id} className="border-b">
+                        <td className="p-4 font-semibold">{reg.name}</td>
+                        <td className="p-4 text-sm">{pkg ? pkg.name : '-'}</td>
+                        <td className="p-4 font-mono font-bold bg-yellow-50/30">{reg.username}</td>
+                        <td className="p-4 font-mono font-bold text-red-600 bg-yellow-50/30">{reg.password}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+             </table>
+          </div>
+        </div>
+      );
+    }
+
+    // --- ADMIN REVENUE ---
+    function AdminRevenue({ registrations, packages, showToast }) {
+      const verifiedRegs = registrations.filter(r => r.status === 'verified' && !r.isDeletedRevenue);
+      const totalRevenue = verifiedRegs.reduce((sum, reg) => {
+        const pkg = packages.find(p => p.id === reg.packageId);
+        return sum + (pkg ? pkg.price : 0);
+      }, 0);
+
+      const handleDeleteRevenueRow = async (id) => {
+        if(window.confirm('Hapus riwayat pendapatan ini?')) {
+           try {
+             await updateDoc(doc(db, "registrations", id), { isDeletedRevenue: true });
+             showToast('Dihapus dari rekapan pendapatan', 'success');
+           } catch(err) { showToast('Error', 'error'); }
+        }
+      };
+
+      return (
+        <div>
+          <div className="flex justify-between items-end mb-8">
+            <h2 className="text-2xl font-bold">Rekap Pendapatan</h2>
+          </div>
+          <div className="bg-green-50 p-6 rounded-xl border border-green-200 mb-6 flex justify-between items-center">
+             <p className="font-semibold text-green-800">Total Pendapatan</p>
+             <p className="text-4xl font-extrabold text-green-600">Rp {totalRevenue.toLocaleString('id-ID')}</p>
+          </div>
+          <div className="bg-white rounded-xl shadow border overflow-hidden">
+             <table className="w-full text-left border-collapse">
+                 <thead>
+                   <tr className="bg-gray-100">
+                     <th className="p-4 text-sm font-bold">Nama</th>
+                     <th className="p-4 text-sm font-bold">Paket</th>
+                     <th className="p-4 text-sm font-bold text-right">Nominal Masuk</th>
+                     <th className="p-4 text-sm font-bold text-center no-print">Aksi</th>
+                   </tr>
+                 </thead>
+                 <tbody>
+                   {verifiedRegs.map(reg => {
+                     const pkg = packages.find(p => p.id === reg.packageId);
+                     return (
+                       <tr key={reg.id} className="border-b">
+                         <td className="p-4 font-semibold">{reg.name}</td>
+                         <td className="p-4 text-sm">{pkg ? pkg.name : '-'}</td>
+                         <td className="p-4 font-bold text-green-600 text-right">Rp {pkg ? pkg.price.toLocaleString('id-ID') : '0'}</td>
+                         <td className="p-4 text-center no-print">
+                           <button onClick={() => handleDeleteRevenueRow(reg.id)} className="bg-red-100 text-red-700 px-3 py-1 text-xs rounded">Hapus</button>
+                         </td>
+                       </tr>
+                     )
+                   })}
+                 </tbody>
+             </table>
+          </div>
+        </div>
+      );
+    }
+
+    // --- ADMIN PACKAGES ---
+    function AdminPackages({ packages, showToast }) {
+      const [editing, setEditing] = useState(null);
+      const [formData, setFormData] = useState({ name: '', price: '', desc: '' });
+      const [isSaving, setIsSaving] = useState(false);
+
+      const handleSave = async (e) => {
+        e.preventDefault();
+        setIsSaving(true);
+        try {
+          const id = editing ? editing : Date.now().toString();
+          await setDoc(doc(db, "packages", id), { ...formData, price: Number(formData.price) });
+          showToast(editing ? 'Paket diupdate' : 'Paket ditambah', 'success');
+          setFormData({ name: '', price: '', desc: '' });
+          setEditing(null);
+        } catch(err) { showToast('Gagal menyimpan', 'error'); }
+        setIsSaving(false);
+      };
+
+      const handleDelete = async (id) => {
+        if(window.confirm('Yakin hapus paket ini di Firebase?')) {
+          try {
+            await deleteDoc(doc(db, "packages", id));
+            showToast('Terhapus', 'info');
+          } catch(err) { showToast('Gagal hapus', 'error'); }
+        }
+      };
+
+      return (
+        <div>
+          <h2 className="text-2xl font-bold mb-6">Kelola Paket Bimbel</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="bg-white p-6 rounded-xl shadow border h-fit">
+              <h3 className="text-lg font-bold mb-4">{editing ? 'Edit' : 'Tambah'} Paket</h3>
+              <form onSubmit={handleSave} className="space-y-4">
+                <input type="text" required value={formData.name} onChange={e=>setFormData({...formData, name: e.target.value})} className="w-full border p-2 rounded" placeholder="Nama Paket"/>
+                <input type="number" required value={formData.price} onChange={e=>setFormData({...formData, price: e.target.value})} className="w-full border p-2 rounded" placeholder="Harga (Rp)"/>
+                <textarea required value={formData.desc} onChange={e=>setFormData({...formData, desc: e.target.value})} className="w-full border p-2 rounded h-24" placeholder="Deskripsi"></textarea>
+                <div className="flex gap-2">
+                  <button type="submit" disabled={isSaving} className="bg-sky-500 text-white px-4 py-2 rounded flex-1">{isSaving ? 'Menyimpan...' : 'Simpan'}</button>
+                  {editing && <button type="button" onClick={() => {setEditing(null); setFormData({name:'',price:'',desc:''})}} className="bg-gray-200 px-4 py-2 rounded">Batal</button>}
+                </div>
+              </form>
+            </div>
+            <div className="lg:col-span-2 space-y-4">
+              {packages.map(pkg => (
+                <div key={pkg.id} className="bg-white p-5 rounded-xl shadow flex justify-between items-center">
+                  <div>
+                    <h4 className="font-bold text-lg">{pkg.name}</h4>
+                    <p className="text-sky-600 font-semibold mb-1">Rp {pkg.price.toLocaleString('id-ID')}</p>
+                    <p className="text-sm text-gray-500">{pkg.desc}</p>
+                  </div>
+                  <div className="flex flex-col gap-2 ml-4">
+                    <button onClick={() => {setEditing(pkg.id); setFormData({name:pkg.name, price:pkg.price, desc:pkg.desc})}} className="bg-yellow-100 text-yellow-800 px-3 py-1 text-sm rounded">Edit</button>
+                    <button onClick={() => handleDelete(pkg.id)} className="bg-red-100 text-red-800 px-3 py-1 text-sm rounded">Hapus</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- ADMIN PAYMENTS ---
+    function AdminPayments({ payments, showToast }) {
+      const [editing, setEditing] = useState(null);
+      const [formData, setFormData] = useState({ type: '', account: '', instructions: '' });
+      const [isSaving, setIsSaving] = useState(false);
+
+      const handleSave = async (e) => {
+        e.preventDefault();
+        setIsSaving(true);
+        try {
+          const id = editing ? editing : Date.now().toString();
+          await setDoc(doc(db, "payments", id), formData);
+          showToast(editing ? 'Metode diupdate' : 'Metode ditambah', 'success');
+          setFormData({ type: '', account: '', instructions: '' });
+          setEditing(null);
+        } catch(err) { showToast('Gagal menyimpan', 'error'); }
+        setIsSaving(false);
+      };
+
+      const handleDelete = async (id) => {
+        if(window.confirm('Hapus dari Firebase?')) {
+           try { await deleteDoc(doc(db, "payments", id)); showToast('Terhapus', 'info'); } 
+           catch(err) { showToast('Error', 'error'); }
+        }
+      };
+
+      return (
+        <div>
+          <h2 className="text-2xl font-bold mb-6">Metode Pembayaran</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="bg-white p-6 rounded-xl shadow border h-fit">
+              <form onSubmit={handleSave} className="space-y-4">
+                <input type="text" required value={formData.type} onChange={e=>setFormData({...formData, type: e.target.value})} className="w-full border p-2 rounded" placeholder="Bank / E-Wallet"/>
+                <input type="text" required value={formData.account} onChange={e=>setFormData({...formData, account: e.target.value})} className="w-full border p-2 rounded" placeholder="No Rekening"/>
+                <textarea required value={formData.instructions} onChange={e=>setFormData({...formData, instructions: e.target.value})} className="w-full border p-2 rounded h-24" placeholder="Instruksi"></textarea>
+                <div className="flex gap-2">
+                  <button type="submit" disabled={isSaving} className="bg-sky-500 text-white px-4 py-2 rounded flex-1">{isSaving ? 'Loading...' : 'Simpan'}</button>
+                  {editing && <button type="button" onClick={() => {setEditing(null); setFormData({type:'',account:'',instructions:''})}} className="bg-gray-200 px-4 py-2 rounded">Batal</button>}
+                </div>
+              </form>
+            </div>
+            <div className="lg:col-span-2 space-y-4">
+              {payments.map(pay => (
+                <div key={pay.id} className="bg-white p-5 rounded-xl shadow flex justify-between items-start">
+                  <div>
+                    <h4 className="font-bold text-lg">{pay.type}</h4>
+                    <p className="font-mono bg-gray-100 inline-block rounded px-2">{pay.account}</p>
+                    <p className="text-sm text-gray-500 mt-2">{pay.instructions}</p>
+                  </div>
+                  <div className="flex flex-col gap-2 ml-4">
+                    <button onClick={() => {setEditing(pay.id); setFormData({type:pay.type, account:pay.account, instructions:pay.instructions})}} className="bg-yellow-100 text-yellow-800 px-3 py-1 text-sm rounded">Edit</button>
+                    <button onClick={() => handleDelete(pay.id)} className="bg-red-100 text-red-800 px-3 py-1 text-sm rounded">Hapus</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --- ADMIN SETTINGS ---
+    function AdminSettings({ settings, showToast }) {
+      const [formData, setFormData] = useState(settings);
+      const [isSaving, setIsSaving] = useState(false);
+
+      const handleSave = async (e) => {
+        e.preventDefault();
+        setIsSaving(true);
+        try {
+          await setDoc(doc(db, "settings", "global"), formData);
+          showToast('Pengaturan tersimpan ke Database!', 'success');
+        } catch(err) { showToast('Gagal simpan', 'error'); }
+        setIsSaving(false);
+      };
+
+      const handleLogoUpload = (e) => {
+        const file = e.target.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const img = new Image();
+          img.onload = async () => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = 400; canvas.height = img.height * (400 / img.width);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const base64 = canvas.toDataURL('image/jpeg', 0.8);
+            setFormData(prev => ({...prev, logo: base64})); 
+            try {
+              await updateDoc(doc(db, "settings", "global"), { logo: base64 });
+              showToast('Logo tersimpan di Firestore!', 'success');
+            } catch(err) { showToast('Gagal simpan logo', 'error'); }
+          };
+          img.src = event.target.result;
+        };
+        reader.readAsDataURL(file);
+      };
+
+      return (
+        <div className="max-w-3xl">
+          <h2 className="text-2xl font-bold mb-6">Pengaturan Website</h2>
+          <form onSubmit={handleSave} className="bg-white p-6 md:p-8 rounded-xl shadow border space-y-6">
+            <div>
+              <label className="block text-sm font-semibold mb-2">Logo Website</label>
+              <div className="flex items-center gap-4">
+                <img src={formData.logo} alt="Logo" className="h-20 w-auto border rounded-lg bg-gray-50 object-contain p-2" />
+                <input type="file" accept="image/*" onChange={handleLogoUpload} className="text-sm file:py-2 file:px-4 file:rounded file:border-0 file:bg-sky-50 file:text-sky-700 cursor-pointer" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-1">Nomor WhatsApp Admin</label>
+              <input type="text" value={formData.adminPhone} onChange={e=>setFormData({...formData, adminPhone: e.target.value})} className="w-full border p-3 rounded-lg" required />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-1">Template WA Pendaftaran Baru</label>
+              <textarea value={formData.waRegTemplate} onChange={e=>setFormData({...formData, waRegTemplate: e.target.value})} className="w-full border p-3 rounded-lg h-24" required></textarea>
+            </div>
+            <div>
+              <label className="block text-sm font-semibold mb-1">Template WA Balasan (Konfirmasi Akun)</label>
+              <textarea value={formData.waApproveTemplate} onChange={e=>setFormData({...formData, waApproveTemplate: e.target.value})} className="w-full border p-3 rounded-lg h-24" required></textarea>
+            </div>
+            <button type="submit" disabled={isSaving} className="bg-black hover:bg-gray-800 text-white font-bold py-3 px-6 rounded-lg w-full md:w-auto shadow-md">
+              {isSaving ? 'Menyimpan...' : 'Simpan Pengaturan'}
+            </button>
+          </form>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
