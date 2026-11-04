@@ -43,7 +43,6 @@
     const db = getFirestore(app);
 
     // --- DEFAULT INITIAL DATA ---
-    // Update instruksi 1: Default adminPhone menjadi awalan 08
     const DEFAULT_SETTINGS = {
       logo: 'https://placehold.co/400x150/0ea5e9/ffffff?text=LOGO+BIMBEL',
       adminPhone: '081234567890',
@@ -60,10 +59,11 @@
     };
 
     // --- FUNGSI GLOBAL DOWNLOAD PDF ---
-    const downloadPDF = (elementId, fileName) => {
+    // Ditambahkan parameter pdfMargin dengan default 0.3
+    const downloadPDF = (elementId, fileName, pdfMargin = 0.3) => {
         const element = document.getElementById(elementId);
         const opt = {
-          margin:       0.3,
+          margin:       pdfMargin,
           filename:     fileName,
           image:        { type: 'jpeg', quality: 0.98 },
           html2canvas:  { 
@@ -168,7 +168,6 @@
       });
       const [isSubmitting, setIsSubmitting] = useState(false);
       
-      // Tambahan State untuk mengontrol tampilan setelah form dikirim
       const [isSuccess, setIsSuccess] = useState(false);
       const [waUrl, setWaUrl] = useState('');
       
@@ -223,7 +222,6 @@
         };
 
         try {
-          // Simpan ke Firestore
           await setDoc(doc(db, "registrations", newRegId), newReg);
           
           showToast('Selamat, pendaftaran Anda telah berhasil dikirim', 'success');
@@ -233,10 +231,8 @@
             .replace(/\[PAKET\]/g, selectedPackage?.name || '-')
             .replace(/\[NOMINAL\]/g, selectedPackage?.price.toLocaleString('id-ID') || '0');
           
-          // Memformat no WA menggunakan helper agar 08 tetap valid jadi 62 untuk URL
           const generatedWaUrl = `https://api.whatsapp.com/send?phone=${formatWaNumber(settings.adminPhone)}&text=${encodeURIComponent(waMsg)}`;
           
-          // Simpan link dan ubah tampilan ke success mode
           setWaUrl(generatedWaUrl);
           setIsSuccess(true);
           
@@ -294,7 +290,6 @@
                     <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition" placeholder="Masukkan nama lengkap Anda" />
                   </div>
 
-                  {/* Instruksi 1: Update Label dan Placeholder untuk format awalan 08 */}
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">2. Nomor WhatsApp Aktif (Gunakan awalan 08) <span className="text-red-500">*</span></label>
                     <input type="text" required value={formData.userWa} onChange={e => setFormData({...formData, userWa: e.target.value})} className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition" placeholder="Contoh: 081234567890" />
@@ -488,7 +483,6 @@
         }
       };
 
-      // Instruksi 2: Fungsi hapus per item untuk pendaftar yang antre
       const handleDeletePending = async (id) => {
         if (window.confirm('Yakin ingin menghapus pendaftar ini?')) {
           try {
@@ -727,6 +721,8 @@
                   <tr className="bg-sky-50">
                     <th className="p-4 text-sm">Nama</th>
                     <th className="p-4 text-sm">Paket</th>
+                    {/* Tambahan Fitur Waktu Bergabung */}
+                    <th className="p-4 text-sm bg-yellow-50">Waktu Bergabung</th>
                     <th className="p-4 text-sm bg-yellow-50">Username</th>
                     <th className="p-4 text-sm bg-yellow-50">Password</th>
                   </tr>
@@ -738,6 +734,9 @@
                       <tr key={reg.id} className="border-b">
                         <td className="p-4 font-semibold">{reg.name}</td>
                         <td className="p-4 text-sm">{pkg ? pkg.name : '-'}</td>
+                        <td className="p-4 text-sm text-gray-600 bg-yellow-50/30">
+                          {reg.verifiedAt ? new Date(reg.verifiedAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : new Date(reg.date).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
+                        </td>
                         <td className="p-4 font-mono font-bold bg-yellow-50/30">{reg.username}</td>
                         <td className="p-4 font-mono font-bold text-red-600 bg-yellow-50/30">{reg.password}</td>
                       </tr>
@@ -771,12 +770,14 @@
         <div>
           <div className="flex justify-between items-end mb-8">
             <h2 className="text-2xl font-bold">Rekap Pendapatan</h2>
+            {/* Tombol dengan ukuran margin 2 diatur pada parameter ketiga pdfMargin */}
+            <button onClick={() => downloadPDF('pdf-revenue', 'Rekap_Pendapatan.pdf', 2)} className="bg-black text-white px-4 py-2 rounded text-sm no-print">Unduh PDF</button>
           </div>
           <div className="bg-green-50 p-6 rounded-xl border border-green-200 mb-6 flex justify-between items-center">
              <p className="font-semibold text-green-800">Total Pendapatan</p>
              <p className="text-4xl font-extrabold text-green-600">Rp {totalRevenue.toLocaleString('id-ID')}</p>
           </div>
-          <div className="bg-white rounded-xl shadow border overflow-hidden">
+          <div id="pdf-revenue" className="bg-white rounded-xl shadow border overflow-hidden">
              <table className="w-full text-left border-collapse">
                  <thead>
                    <tr className="bg-gray-100">
@@ -941,6 +942,7 @@
         e.preventDefault();
         setIsSaving(true);
         try {
+          // Memastikan semua formData (termasuk draft logo dan teks) tersimpan utuh dan bersamaan
           await setDoc(doc(db, "settings", "global"), formData);
           showToast('Pengaturan tersimpan ke Database!', 'success');
         } catch(err) { showToast('Gagal simpan', 'error'); }
@@ -953,17 +955,17 @@
         const reader = new FileReader();
         reader.onload = (event) => {
           const img = new Image();
-          img.onload = async () => {
+          img.onload = () => {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
             canvas.width = 400; canvas.height = img.height * (400 / img.width);
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             const base64 = canvas.toDataURL('image/jpeg', 0.8);
+            
+            // HANYA update state lokal formData.
+            // Menghindari updateDoc langsung di sini supaya teks yang diketik tidak ter-reset/hilang.
+            // Pengguna tetap wajib klik "Simpan Pengaturan" agar Firebase di-update secara penuh.
             setFormData(prev => ({...prev, logo: base64})); 
-            try {
-              await updateDoc(doc(db, "settings", "global"), { logo: base64 });
-              showToast('Logo tersimpan di Firestore!', 'success');
-            } catch(err) { showToast('Gagal simpan logo', 'error'); }
           };
           img.src = event.target.result;
         };
