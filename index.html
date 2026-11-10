@@ -59,7 +59,6 @@
     };
 
     // --- FUNGSI GLOBAL DOWNLOAD PDF ---
-    // Ditambahkan parameter pdfMargin dengan default 0.3
     const downloadPDF = (elementId, fileName, pdfMargin = 0.3) => {
         const element = document.getElementById(elementId);
         const opt = {
@@ -79,7 +78,7 @@
     // --- MAIN APP COMPONENT ---
     function App() {
       // Global States
-      const [view, setView] = useState('user'); // 'user' or 'admin'
+      const [view, setView] = useState('user'); 
       const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(false);
       const [toast, setToast] = useState(null);
       const [loading, setLoading] = useState(true);
@@ -92,25 +91,41 @@
 
       // Sinkronisasi dengan Firebase Realtime (onSnapshot)
       useEffect(() => {
+        // Objek untuk melacak status pemuatan setiap data secara spesifik
+        let loadedStatus = { settings: false, packages: false, payments: false, regs: false };
+
+        const checkAllLoaded = () => {
+          if (loadedStatus.settings && loadedStatus.packages && loadedStatus.payments && loadedStatus.regs) {
+            setLoading(false);
+          }
+        };
+
         const unsubSettings = onSnapshot(doc(db, "settings", "global"), (docSnap) => {
           if (docSnap.exists()) {
             setSettings(docSnap.data());
           } else {
             setDoc(doc(db, "settings", "global"), DEFAULT_SETTINGS);
           }
+          loadedStatus.settings = true;
+          checkAllLoaded();
         });
 
         const unsubPackages = onSnapshot(collection(db, "packages"), (snap) => {
           setPackages(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+          loadedStatus.packages = true;
+          checkAllLoaded();
         });
 
         const unsubPayments = onSnapshot(collection(db, "payments"), (snap) => {
           setPayments(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+          loadedStatus.payments = true;
+          checkAllLoaded();
         });
 
         const unsubRegs = onSnapshot(collection(db, "registrations"), (snap) => {
           setRegistrations(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-          setLoading(false);
+          loadedStatus.regs = true;
+          checkAllLoaded();
         });
 
         return () => {
@@ -938,12 +953,17 @@
       const [formData, setFormData] = useState(settings);
       const [isSaving, setIsSaving] = useState(false);
 
+      // FIX: Menjaga state form selalu sinkron apabila data props (dari Firebase) baru ditarik/terupdate
+      useEffect(() => {
+        setFormData(settings);
+      }, [settings]);
+
       const handleSave = async (e) => {
         e.preventDefault();
         setIsSaving(true);
         try {
-          // Memastikan semua formData (termasuk draft logo dan teks) tersimpan utuh dan bersamaan
-          await setDoc(doc(db, "settings", "global"), formData);
+          // FIX: Menambahkan argumen { merge: true } agar tidak merusak field yang berpotensi ditambahkan ke depannya
+          await setDoc(doc(db, "settings", "global"), formData, { merge: true });
           showToast('Pengaturan tersimpan ke Database!', 'success');
         } catch(err) { showToast('Gagal simpan', 'error'); }
         setIsSaving(false);
@@ -962,9 +982,6 @@
             ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
             const base64 = canvas.toDataURL('image/jpeg', 0.8);
             
-            // HANYA update state lokal formData.
-            // Menghindari updateDoc langsung di sini supaya teks yang diketik tidak ter-reset/hilang.
-            // Pengguna tetap wajib klik "Simpan Pengaturan" agar Firebase di-update secara penuh.
             setFormData(prev => ({...prev, logo: base64})); 
           };
           img.src = event.target.result;
