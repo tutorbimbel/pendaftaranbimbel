@@ -45,7 +45,7 @@
     // --- DEFAULT INITIAL DATA ---
     const DEFAULT_SETTINGS = {
       logo: 'https://placehold.co/400x150/0ea5e9/ffffff?text=LOGO+BIMBEL',
-      adminPhone: '081234567890',
+      adminPhone: '085709631793',
       waRegTemplate: 'Halo Admin, saya [NAMA] telah mendaftar [PAKET]. Berikut bukti pembayarannya dengan nominal Rp[NOMINAL]. Mohon segera diproses.',
       waApproveTemplate: 'Selamat akun anda telah aktif. Berikut adalah\nUsername: [USERNAME]\nPassword: [PASSWORD]\n\nYang dapat digunakan untuk login. Apabila ada kendala segera hubungi admin.'
     };
@@ -292,7 +292,7 @@
 
                   <div>
                     <label className="block text-sm font-semibold text-gray-700 mb-2">2. Nomor WhatsApp Aktif (Gunakan awalan 08) <span className="text-red-500">*</span></label>
-                    <input type="text" required value={formData.userWa} onChange={e => setFormData({...formData, userWa: e.target.value})} className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition" placeholder="Contoh: 081234567890" />
+                    <input type="text" required value={formData.userWa} onChange={e => setFormData({...formData, userWa: e.target.value})} className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition" placeholder="Contoh: 085709631793" />
                   </div>
 
                   <div>
@@ -985,7 +985,7 @@
             </div>
             <div>
               <label className="block text-sm font-semibold mb-1">Nomor WhatsApp Admin</label>
-              <input type="text" value={formData.adminPhone} onChange={e=>setFormData({...formData, adminPhone: e.target.value})} className="w-full border p-3 rounded-lg" placeholder="Contoh: 081234567890" required />
+              <input type="text" value={formData.adminPhone} onChange={e=>setFormData({...formData, adminPhone: e.target.value})} className="w-full border p-3 rounded-lg" placeholder="Contoh: 085709631793" required />
             </div>
             <div>
               <label className="block text-sm font-semibold mb-1">Template WA Pendaftaran Baru</label>
